@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: whisper-indexer
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: CONTRACT_ID
+        value: whisper.kaizap.near
+      - key: NEARDATA_URL
+        value: https://mainnet.neardata.xyz/v0
+      - key: START_BLOCK
+        value: "183505538"
+      - key: DB_PATH
+        value: /data/whisper.db
+    disk:
+      name: whisper-data
+      mountPath: /data
+      sizeGB: 1
