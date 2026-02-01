@@ -4,7 +4,7 @@ export interface WhisperEvent {
   standard: 'whisper';
   version: string;
   event: string;
-  data: Record<string, unknown>[];
+  data: Record<string, unknown> | Record<string, unknown>[];
 }
 
 export interface MessageSentEvent {
@@ -14,6 +14,8 @@ export interface MessageSentEvent {
   nonce: string;
   recipient_key_version: number;
   reply_to: string | null;
+  timestamp?: number;
+  id?: number;
 }
 
 export interface MessageSentWithPaymentEvent extends MessageSentEvent {

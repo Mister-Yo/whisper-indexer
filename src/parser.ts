@@ -58,14 +58,18 @@ export function parseBlock(blockData: NearBlock): number {
 
           const txHash = reo.tx_hash || reo.execution_outcome.id;
 
-          for (const item of event.data) {
+          // data can be a single object or an array
+          const items = Array.isArray(event.data) ? event.data : [event.data];
+
+          for (const item of items) {
             switch (event.event) {
+              case 'message':
               case 'message_sent': {
                 const d = item as unknown as MessageSentEvent;
                 saveMessage({
                   tx_hash: txHash,
                   block_height: blockHeight,
-                  timestamp_ns: timestampNs,
+                  timestamp_ns: d.timestamp ? String(d.timestamp) : timestampNs,
                   event_type: 'message_sent',
                   sender: d.from,
                   recipient: d.to,
@@ -79,12 +83,13 @@ export function parseBlock(blockData: NearBlock): number {
                 break;
               }
 
+              case 'message_with_payment':
               case 'message_sent_with_payment': {
                 const d = item as unknown as MessageSentWithPaymentEvent;
                 saveMessage({
                   tx_hash: txHash,
                   block_height: blockHeight,
-                  timestamp_ns: timestampNs,
+                  timestamp_ns: d.timestamp ? String(d.timestamp) : timestampNs,
                   event_type: 'message_sent_with_payment',
                   sender: d.from,
                   recipient: d.to,

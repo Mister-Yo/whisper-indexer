@@ -2,10 +2,10 @@ import { parseBlock } from './parser.js';
 import { getLastBlockHeight, setLastBlockHeight } from './db.js';
 
 const NEARDATA_URL = process.env.NEARDATA_URL || 'https://mainnet.neardata.xyz/v0';
-const POLL_INTERVAL_MS = 50;        // between blocks when catching up
+const POLL_INTERVAL_MS = 350;       // ~170 blocks/min, under 180/min rate limit
 const IDLE_INTERVAL_MS = 1000;      // when at chain tip
 const MAX_RETRIES = 3;
-const RETRY_BASE_MS = 500;
+const RETRY_BASE_MS = 1000;
 
 let running = false;
 let latestKnownHeight = 0;
@@ -15,10 +15,18 @@ async function fetchBlock(height: number): Promise<unknown | null> {
   const res = await fetch(url);
 
   if (res.status === 200) {
-    return await res.json();
+    const text = await res.text();
+    if (!text || text.length < 2) return null;
+    try {
+      const data = JSON.parse(text);
+      // Rate limit error comes as JSON with "error" field
+      if (data && data.error) return null;
+      return data;
+    } catch {
+      return null;
+    }
   }
 
-  // Block not available — either skipped or not yet produced
   return null;
 }
 
@@ -26,7 +34,8 @@ async function fetchLatestBlockHeight(): Promise<number> {
   try {
     const res = await fetch(`${NEARDATA_URL}/last_block/final`);
     if (!res.ok) return latestKnownHeight;
-    const data = await res.json() as { block: { header: { height: number } } };
+    const data = await res.json() as { block?: { header: { height: number } }; error?: string };
+    if (data.error || !data.block) return latestKnownHeight;
     latestKnownHeight = data.block.header.height;
     return latestKnownHeight;
   } catch {
@@ -37,8 +46,12 @@ async function fetchLatestBlockHeight(): Promise<number> {
 async function fetchBlockWithRetry(height: number): Promise<unknown | null> {
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      // Don't retry on null — missing blocks are just skipped
-      return await fetchBlock(height);
+      const result = await fetchBlock(height);
+      if (result !== null) return result;
+      // Null result — could be rate limit or genuinely missing. Retry with backoff.
+      if (attempt < MAX_RETRIES - 1) {
+        await sleep(RETRY_BASE_MS * Math.pow(2, attempt));
+      }
     } catch (err) {
       if (attempt === MAX_RETRIES - 1) throw err;
       await sleep(RETRY_BASE_MS * Math.pow(2, attempt));
@@ -60,7 +73,6 @@ export async function getStartBlockHeight(): Promise<number> {
     return parseInt(envStart, 10);
   }
 
-  // Default: start from latest block (skip historical data)
   const latest = await fetchLatestBlockHeight();
   console.log(`No saved state, starting from latest block: ${latest}`);
   return latest;
@@ -80,15 +92,13 @@ export async function startIndexing(): Promise<void> {
 
   while (running) {
     try {
-      // Refresh chain tip periodically
-      if (blocksProcessed % 500 === 0) {
+      if (blocksProcessed % 200 === 0) {
         latestKnownHeight = await fetchLatestBlockHeight();
       }
 
       const isAtTip = currentHeight > latestKnownHeight;
 
       if (isAtTip) {
-        // At chain tip — wait and refresh
         await sleep(IDLE_INTERVAL_MS);
         latestKnownHeight = await fetchLatestBlockHeight();
         continue;
@@ -97,7 +107,6 @@ export async function startIndexing(): Promise<void> {
       const blockData = await fetchBlockWithRetry(currentHeight);
 
       if (blockData === null) {
-        // Block genuinely missing (skipped in neardata) — move to next
         skippedBlocks++;
         setLastBlockHeight(currentHeight);
         currentHeight++;
@@ -114,7 +123,6 @@ export async function startIndexing(): Promise<void> {
       setLastBlockHeight(currentHeight);
       blocksProcessed++;
 
-      // Log progress periodically
       if (blocksProcessed % 1000 === 0) {
         const behindBlocks = latestKnownHeight - currentHeight;
         console.log(`Progress: block ${currentHeight}, ${totalEvents} events, ${blocksProcessed} processed, ${skippedBlocks} skipped, ${behindBlocks} behind`);
