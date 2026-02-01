@@ -3,9 +3,11 @@ import { getLastBlockHeight, setLastBlockHeight } from './db.js';
 
 const NEARDATA_URL = process.env.NEARDATA_URL || 'https://mainnet.neardata.xyz/v0';
 const POLL_INTERVAL_MS = 350;       // ~170 blocks/min, under 180/min rate limit
+const CATCHUP_INTERVAL_MS = 50;     // faster polling when catching up (far from tip)
 const IDLE_INTERVAL_MS = 1000;      // when at chain tip
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 1000;
+const CATCHUP_THRESHOLD = 100;      // blocks behind tip to consider "catching up"
 
 let running = false;
 let latestKnownHeight = 0;
@@ -129,7 +131,8 @@ export async function startIndexing(): Promise<void> {
       }
 
       currentHeight++;
-      await sleep(POLL_INTERVAL_MS);
+      const behindBy = latestKnownHeight - currentHeight;
+      await sleep(behindBy > CATCHUP_THRESHOLD ? CATCHUP_INTERVAL_MS : POLL_INTERVAL_MS);
     } catch (err) {
       console.error(`Error at block ${currentHeight}:`, err);
       await sleep(5000);
